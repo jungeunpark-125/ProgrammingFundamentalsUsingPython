@@ -162,7 +162,7 @@ map_metric = st.sidebar.radio(
     ),
 )
 
-st.title("투표용지 부족 위험 대시보드 — 6~8회 지방선거 (2014~2022)")
+st.title("투표용지 부족 위험 대시보드 — 6\\~8회 지방선거 (2014\\~2022)")
 
 # 왼쪽/오른쪽 패널 사이 여백을 넓게. gap 옵션을 지원하지 않는 구버전 streamlit이면
 # 빈 스페이서 컬럼으로 자동 대체.
@@ -315,7 +315,7 @@ with col_right:
     with tab_radar:
         radar_mode = st.radio(
             "비교 방식",
-            ["a) 이 동의 6~8회 추이", "b) 이 동 vs 구 평균 vs 전국 평균"],
+            ["a) 이 동의 6\\~8회 추이", "b) 이 동 vs 구 평균 vs 전국 평균"],
             horizontal=True,
         )
 
@@ -361,4 +361,4 @@ with col_right:
             showlegend=True, height=420,
         )
         st.plotly_chart(fig_radar, use_container_width=True)
-        st.caption("모든 축은 전국 동 대비 백분위(0~100)로 정규화된 값입니다. 100에 가까울수록 전국에서 상위권이라는 뜻이에요.")
+        st.caption("모든 축은 전국 동 대비 백분위(0\\~100)로 정규화된 값입니다. 100에 가까울수록 전국에서 상위권이라는 뜻이에요.")
