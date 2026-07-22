@@ -9,6 +9,7 @@ Required files (relative to this file):
     otherwise a placeholder message is shown instead)
 """
 
+import glob
 import json
 import os
 import re
@@ -22,7 +23,29 @@ from korean_romanizer.romanizer import Romanizer
 
 st.set_page_config(page_title="Ballot Shortage Risk Dashboard", layout="wide")
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "Data&Code", "05_지방선거_읍면동_통합_6to8회.csv")
+
+def _resolve_data_path():
+    """Locate the main dataset by pattern instead of an exact Korean filename match.
+    Some filesystems/uploaders (notably macOS) normalize Korean filenames to a
+    decomposed (NFD) Unicode form, which is byte-different from the composed (NFC)
+    form used in this source file -- an exact-string path lookup then fails even
+    though the filename displays identically everywhere. Globbing on the ASCII
+    prefix/suffix avoids depending on that normalization entirely.
+    """
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "Data&Code")
+    matches = sorted(
+        p for p in glob.glob(os.path.join(data_dir, "05_*.csv"))
+        if not os.path.basename(p).startswith(("05b_", "05c_"))
+    )
+    if not matches:
+        raise FileNotFoundError(
+            f"Could not find the main dataset (a '05_*.csv' file) in {data_dir}. "
+            "Check that the CSV was committed/pushed to the repo."
+        )
+    return matches[0]
+
+
+DATA_PATH = _resolve_data_path()
 GEOJSON_PATH = os.path.join(os.path.dirname(__file__), "..", "GeoData", "skorea-municipalities-2018-topo-simple.json")
 
 ELECTIONS = ["제6회 전국동시지방선거", "제7회 전국동시지방선거", "제8회 전국동시지방선거"]

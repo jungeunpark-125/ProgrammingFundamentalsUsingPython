@@ -8,6 +8,7 @@
   - ../GeoData/skorea-municipalities-2018-topo-simple.json  (선택 — 있으면 지도가 뜨고, 없으면 지도 자리에 안내 문구만 표시됨)
 """
 
+import glob
 import json
 import os
 
@@ -19,7 +20,28 @@ import streamlit as st
 
 st.set_page_config(page_title="투표용지 부족 위험 대시보드", layout="wide")
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "Data&Code", "05_지방선거_읍면동_통합_6to8회.csv")
+
+def _resolve_data_path():
+    """정확한 한글 파일명 문자열이 아니라 패턴(glob)으로 데이터 파일을 찾음.
+    맥에서 업로드한 파일은 한글 파일명이 분해형(NFD) 유니코드로 저장되는 경우가 있어서,
+    이 소스 파일에 적힌 완성형(NFC) 문자열과 바이트 단위로 다르면 화면엔 똑같아 보여도
+    exact-path로는 못 찾음(FileNotFoundError). 영문 접두/접미사만으로 glob 검색해서
+    이 정규화 문제 자체를 피함.
+    """
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "Data&Code")
+    matches = sorted(
+        p for p in glob.glob(os.path.join(data_dir, "05_*.csv"))
+        if not os.path.basename(p).startswith(("05b_", "05c_"))
+    )
+    if not matches:
+        raise FileNotFoundError(
+            f"메인 데이터 파일('05_*.csv')을 {data_dir}에서 못 찾았어요. "
+            "CSV가 깃허브에 제대로 커밋/푸시됐는지 확인해주세요."
+        )
+    return matches[0]
+
+
+DATA_PATH = _resolve_data_path()
 GEOJSON_PATH = os.path.join(os.path.dirname(__file__), "..", "GeoData", "skorea-municipalities-2018-topo-simple.json")
 
 ELECTIONS = ["제6회 전국동시지방선거", "제7회 전국동시지방선거", "제8회 전국동시지방선거"]
