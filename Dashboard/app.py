@@ -185,8 +185,12 @@ st.sidebar.divider()
 map_election = st.sidebar.radio("Election shown on map", ELECTIONS, format_func=lambda e: ELECTION_LABEL[e], index=2)
 map_metric = st.sidebar.radio(
     "Map color metric",
-    ["당일투표율", "부족_50"],
-    format_func=lambda m: "Rate risk (election-day turnout %)" if m == "당일투표율" else "Absolute risk (shortage_50, ballots)",
+    ["절대량위험", "비율위험"],
+    format_func=lambda m: (
+        "Absolute risk (day-of votes vs 50%-prepared ballots, signed count)"
+        if m == "절대량위험"
+        else "Rate risk (this gu's Risk_index_50 std vs national average std)"
+    ),
 )
 
 st.title("Ballot Shortage Risk Dashboard -- Local Elections 6th-8th (2014-2022)")
@@ -214,12 +218,19 @@ with col_left:
         gu_summary = (
             df[df["선거명"] == map_election]
             .groupby(["시도명", "구시군명"])
-            .agg(당일투표율=("당일투표율", "mean"), 부족_50=("부족_50", "sum"))
+            .agg(절대량위험=("절대량위험_구", "mean"), 비율위험=("비율위험_구", "mean"))
             .reset_index()
         )
         gu_summary["join_key"] = gu_summary["시도명"] + "_" + gu_summary["구시군명"]
         gu_summary["Sido"] = gu_summary["시도명"].map(SIDO_EN)
         gu_summary["Gu/Gun/Si"] = gu_summary["구시군명"].map(GU_EN)
+
+        # 절대량위험 is signed (+shortage / -surplus) -> diverging scale centered at 0.
+        # 비율위험 is a ratio centered around 1 (>1 = more variance than the national average).
+        if map_metric == "절대량위험":
+            color_kwargs = dict(color_continuous_scale="RdBu_r", color_continuous_midpoint=0)
+        else:
+            color_kwargs = dict(color_continuous_scale="Reds")
 
         map_kwargs = dict(
             data_frame=gu_summary,
@@ -227,11 +238,11 @@ with col_left:
             locations="join_key",
             featureidkey="properties.join_key",
             color=map_metric,
-            color_continuous_scale="Reds",
             zoom=5.8,
             center={"lat": 36.3, "lon": 127.8},
             opacity=0.75,
             hover_data=["Sido", "Gu/Gun/Si"],
+            **color_kwargs,
         )
         # Newer plotly has choropleth_map (maplibre); fall back to choropleth_mapbox on older installs
         if hasattr(px, "choropleth_map"):
@@ -270,19 +281,57 @@ with col_right:
         with c:
             st.metric(row["election_label"], f"{row['선거인수_총']:,.0f}", "Registered voters")
 
+    st.caption(
+        "Rate risk (variance-based) is only defined where there are sub-units to compare -- "
+        f"gu/sido level. Values below are for {gu_en}'s parent gu and sido."
+    )
+    ctx_cols = st.columns(len(dong_df)) if len(dong_df) > 0 else [st]
+    for c, (_, row) in zip(ctx_cols, dong_df.iterrows()):
+        with c:
+            st.markdown(f"**{row['election_label']}**")
+            st.metric(
+                "Gu absolute risk (ballots)",
+                f"{row['절대량위험_구']:+,.0f}",
+                help="Sum of (day-of votes - 50%-prepared ballots) across all dongs in this gu. Positive = net shortage.",
+            )
+            st.metric(
+                "Gu rate risk (std ratio)",
+                f"{row['비율위험_구']:.2f}x" if pd.notna(row["비율위험_구"]) else "N/A",
+                help="This gu's std of Risk_index_50 across its dongs, divided by the national average of that std. >1 = more internal volatility than average (some dongs may run short even if the gu average looks fine).",
+            )
+            st.metric(
+                "Sido rate risk (std ratio)",
+                f"{row['비율위험_시도']:.2f}x" if pd.notna(row["비율위험_시도"]) else "N/A",
+                help="This sido's std of gu-level Risk_index_50, divided by the national average of that std.",
+            )
+
     tab_trend, tab_sim, tab_radar = st.tabs(["Trends", "Threshold Simulator", "Radar Profile"])
 
     # ---- Tab 1: absolute / rate risk trend across elections --------------
     with tab_trend:
-        fig = px.bar(dong_df, x="election_label", y="부족_50", title="Absolute risk (shortage_50, ballots)", color="election_label")
+        fig = px.bar(
+            dong_df, x="election_label", y="절대량위험",
+            title="Absolute risk (day-of votes − 50%-prepared ballots, signed)",
+            color="election_label",
+        )
+        fig.add_hline(y=0, line_dash="dash", line_color="gray")
         fig.update_layout(showlegend=False, height=320)
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("Positive = shortage (day-of votes exceeded the 50%-prepared ballots). Negative = surplus.")
 
-        fig = px.line(dong_df, x="election_label", y="당일투표율", markers=True, title="Rate risk (election-day turnout %)")
-        fig.add_hline(y=50, line_dash="dash", line_color="red")
-        fig.add_hline(y=60, line_dash="dot", line_color="darkred")
-        fig.update_layout(height=320)
+        fig = px.bar(
+            dong_df, x="election_label", y="비율위험_구",
+            title=f"Rate risk of {gu_en} (this dong's parent gu)",
+            color="election_label",
+        )
+        fig.add_hline(y=1, line_dash="dash", line_color="red")
+        fig.update_layout(showlegend=False, height=320)
         st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Std of Risk_index_50 across dongs in this gu, divided by the national average of that std "
+            "(dashed line = 1, i.e. national average). >1 means this gu's dongs vary more than typical -- "
+            "a high average turnout can still hide one or two dongs that run short."
+        )
 
     # ---- Tab 2: live threshold slider --------------------------------------
     with tab_sim:
@@ -308,8 +357,8 @@ with col_right:
         )
 
         RADAR_AXES = {
-            "당일투표율_pct": "Rate risk",
-            "부족_50_pct": "Absolute risk",
+            "비율위험_구_pct": "Rate risk (gu variance)",
+            "절대량위험_pct": "Absolute risk",
             "선거인수_총_pct": "Population size",
             "관내사전투표비중_pct": "Early-voting preference",
             "당일투표율_변동성_pct": "Forecast volatility",

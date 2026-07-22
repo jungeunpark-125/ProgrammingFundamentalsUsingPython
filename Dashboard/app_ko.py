@@ -132,8 +132,12 @@ st.sidebar.divider()
 map_election = st.sidebar.radio("지도에 표시할 선거", ELECTIONS, format_func=lambda e: ELECTION_LABEL[e], index=2)
 map_metric = st.sidebar.radio(
     "지도 색상 기준",
-    ["당일투표율", "부족_50"],
-    format_func=lambda m: "비율 위험 (당일투표율 %)" if m == "당일투표율" else "절대량 위험 (부족_50, 장)",
+    ["절대량위험", "비율위험"],
+    format_func=lambda m: (
+        "절대량 위험 (당일투표수 vs 50% 준비 용지, 매수 차이)"
+        if m == "절대량위험"
+        else "비율 위험 (이 구의 Risk_index_50 표준편차 ÷ 전국 평균)"
+    ),
 )
 
 st.title("투표용지 부족 위험 대시보드 — 6~8회 지방선거 (2014~2022)")
@@ -161,10 +165,17 @@ with col_left:
         gu_summary = (
             df[df["선거명"] == map_election]
             .groupby(["시도명", "구시군명"])
-            .agg(당일투표율=("당일투표율", "mean"), 부족_50=("부족_50", "sum"))
+            .agg(절대량위험=("절대량위험_구", "mean"), 비율위험=("비율위험_구", "mean"))
             .reset_index()
         )
         gu_summary["join_key"] = gu_summary["시도명"] + "_" + gu_summary["구시군명"]
+
+        # 절대량위험은 부호가 있는 값(+부족/-여유)이라 0을 기준으로 하는 발산형 색상,
+        # 비율위험은 1을 기준으로 하는 비율값이라 단조 색상(Reds)을 사용.
+        if map_metric == "절대량위험":
+            color_kwargs = dict(color_continuous_scale="RdBu_r", color_continuous_midpoint=0)
+        else:
+            color_kwargs = dict(color_continuous_scale="Reds")
 
         map_kwargs = dict(
             data_frame=gu_summary,
@@ -172,11 +183,11 @@ with col_left:
             locations="join_key",
             featureidkey="properties.join_key",
             color=map_metric,
-            color_continuous_scale="Reds",
             zoom=5.8,
             center={"lat": 36.3, "lon": 127.8},
             opacity=0.75,
             hover_data=["시도명", "구시군명"],
+            **color_kwargs,
         )
         # plotly 버전에 따라 choropleth_map(신규, maplibre)이 없을 수 있어서
         # 있으면 그걸 쓰고, 없으면 구버전 choropleth_mapbox로 자동 대체
@@ -211,19 +222,57 @@ with col_right:
         with c:
             st.metric(row["election_label"], f"{row['선거인수_총']:,.0f} 명", "확정선거인수")
 
+    st.caption(
+        f"비율 위험(변동성 기반)은 비교할 하위 단위가 있어야 계산할 수 있어요 — 구/시도 단위 값입니다. "
+        f"아래는 {dong}이 속한 {gu}(구)와 시도 기준 값이에요."
+    )
+    ctx_cols = st.columns(len(dong_df)) if len(dong_df) > 0 else [st]
+    for c, (_, row) in zip(ctx_cols, dong_df.iterrows()):
+        with c:
+            st.markdown(f"**{row['election_label']}**")
+            st.metric(
+                "구 절대량위험 (매수)",
+                f"{row['절대량위험_구']:+,.0f}",
+                help="구 안의 모든 동에서 (당일투표수 - 50%준비용지)를 합산한 값. 양수면 구 전체로도 순부족.",
+            )
+            st.metric(
+                "구 비율위험 (표준편차 비)",
+                f"{row['비율위험_구']:.2f}배" if pd.notna(row["비율위험_구"]) else "N/A",
+                help="이 구 안 동들의 Risk_index_50 표준편차 ÷ 전국 구 표준편차 평균. 1보다 크면 이 구는 동네 간 격차(변동성)가 전국 평균보다 큼 — 구 평균은 괜찮아 보여도 특정 동에서 몰아서 부족할 위험.",
+            )
+            st.metric(
+                "시도 비율위험 (표준편차 비)",
+                f"{row['비율위험_시도']:.2f}배" if pd.notna(row["비율위험_시도"]) else "N/A",
+                help="이 시도 안 구들의 Risk_index_50(구 단위) 표준편차 ÷ 전국 시도 표준편차 평균.",
+            )
+
     tab_trend, tab_sim, tab_radar = st.tabs(["추이", "Threshold 시뮬레이터", "레이더 프로파일"])
 
     # ---- 탭 1: 절대량/비율 위험 추이 --------------------------------------
     with tab_trend:
-        fig = px.bar(dong_df, x="election_label", y="부족_50", title="절대량 위험 (부족_50, 장)", color="election_label")
+        fig = px.bar(
+            dong_df, x="election_label", y="절대량위험",
+            title="절대량 위험 (당일투표수 − 50% 준비 용지, 부호 유지)",
+            color="election_label",
+        )
+        fig.add_hline(y=0, line_dash="dash", line_color="gray")
         fig.update_layout(showlegend=False, height=320)
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("양수 = 부족(당일투표수가 50% 준비량을 초과), 음수 = 여유.")
 
-        fig = px.line(dong_df, x="election_label", y="당일투표율", markers=True, title="비율 위험 (당일투표율 %)")
-        fig.add_hline(y=50, line_dash="dash", line_color="red")
-        fig.add_hline(y=60, line_dash="dot", line_color="darkred")
-        fig.update_layout(height=320)
+        fig = px.bar(
+            dong_df, x="election_label", y="비율위험_구",
+            title=f"{gu}(이 동이 속한 구)의 비율 위험",
+            color="election_label",
+        )
+        fig.add_hline(y=1, line_dash="dash", line_color="red")
+        fig.update_layout(showlegend=False, height=320)
         st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "이 구 안 동들의 Risk_index_50 표준편차 ÷ 전국 평균 표준편차 (점선 = 1, 즉 전국 평균). "
+            "1보다 크면 이 구는 동네 간 변동성이 평균보다 크다는 뜻 — 평균 투표율이 높아 보여도 "
+            "일부 동에서 부족 사태가 날 위험이 있음을 뜻합니다."
+        )
 
     # ---- 탭 2: threshold 슬라이더 — 실시간 예상 부족량 --------------------
     with tab_sim:
@@ -249,8 +298,8 @@ with col_right:
         )
 
         RADAR_AXES = {
-            "당일투표율_pct": "비율 위험",
-            "부족_50_pct": "절대량 위험",
+            "비율위험_구_pct": "비율 위험 (구 변동성)",
+            "절대량위험_pct": "절대량 위험",
             "선거인수_총_pct": "동네 규모",
             "관내사전투표비중_pct": "사전투표 선호도",
             "당일투표율_변동성_pct": "예측 변동성",
