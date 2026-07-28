@@ -1,185 +1,38 @@
 """
-Ballot Shortage Risk Dashboard (Local Elections, 6th-8th / 2014-2022)
+Ballot Shortage Risk Dashboard (Local Elections, 6th-8th / 2014-2022) -- EN
 Sido > Gu > Dong drill-down for absolute-risk and rate-risk analysis.
 
-Run: streamlit run app.py
-Required files (relative to this file):
-  - ../Data&Code/05_지방선거_읍면동_통합_6to8회.csv   (required)
-  - ../GeoData/skorea-municipalities-2018-topo-simple.json  (optional -- map renders if present,
+This is the main entry point of the multi-page app:
+    streamlit run app.py
+
+Other dashboards (Korean risk dashboard, EN/KO forecast dashboards) live under
+pages/ and appear automatically in the sidebar navigator. Shared code lives in
+common.py.
+
+Required files (relative to the project root, i.e. one level up from this file):
+  - Data&Code/05_지방선거_읍면동_통합_6to8회.csv   (required)
+  - GeoData/skorea-municipalities-2018-topo-simple.json  (optional -- map renders if present,
     otherwise a placeholder message is shown instead)
 """
 
-import glob
-import json
-import os
-import re
-
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from korean_romanizer.romanizer import Romanizer
+
+from common import GEOJSON_PATH, SIDO_EN, build_name_maps, choropleth_map, load_geojson, resolve_data_file
 
 st.set_page_config(page_title="Ballot Shortage Risk Dashboard", layout="wide")
 
-
-def _resolve_data_path():
-    """Locate the main dataset by pattern instead of an exact Korean filename match.
-    Some filesystems/uploaders (notably macOS) normalize Korean filenames to a
-    decomposed (NFD) Unicode form, which is byte-different from the composed (NFC)
-    form used in this source file -- an exact-string path lookup then fails even
-    though the filename displays identically everywhere. Globbing on the ASCII
-    prefix/suffix avoids depending on that normalization entirely.
-    """
-    data_dir = os.path.join(os.path.dirname(__file__), "..", "Data&Code")
-    matches = sorted(
-        p for p in glob.glob(os.path.join(data_dir, "05_*.csv"))
-        if not os.path.basename(p).startswith(("05b_", "05c_"))
-    )
-    if not matches:
-        raise FileNotFoundError(
-            f"Could not find the main dataset (a '05_*.csv' file) in {data_dir}. "
-            "Check that the CSV was committed/pushed to the repo."
-        )
-    return matches[0]
-
-
-DATA_PATH = _resolve_data_path()
-GEOJSON_PATH = os.path.join(os.path.dirname(__file__), "..", "GeoData", "skorea-municipalities-2018-topo-simple.json")
+DATA_PATH = resolve_data_file("05_", exclude_prefixes=("05b_", "05c_"))
 
 ELECTIONS = ["제6회 전국동시지방선거", "제7회 전국동시지방선거", "제8회 전국동시지방선거"]
 ELECTION_LABEL = {ELECTIONS[0]: "6th (2014)", ELECTIONS[1]: "7th (2018)", ELECTIONS[2]: "8th (2022)"}
 
-# geojson (southkorea-maps, GADM-based) "code" prefix (first 2 digits) -> sido name.
-# This is NOT the official KOSTAT admin code scheme (e.g. "26" here = Ulsan, not Busan) --
-# mapping was verified empirically against our own dataset.
-SIDO_CODE_PREFIX = {
-    "11": "서울특별시", "21": "부산광역시", "22": "대구광역시", "23": "인천광역시",
-    "24": "광주광역시", "25": "대전광역시", "26": "울산광역시", "29": "세종특별자치시",
-    "31": "경기도", "32": "강원도", "33": "충청북도", "34": "충청남도",
-    "35": "전라북도", "36": "전라남도", "37": "경상북도", "38": "경상남도",
-    "39": "제주특별자치도",
-}
-# Name mismatches between geojson and our dataset (renamed/merged districts)
-NAME_ALIAS = {"세종시": "세종특별자치시"}
 
-# English display names for sido/gu (for UI labels; underlying joins still use Korean keys)
-SIDO_EN = {
-    "서울특별시": "Seoul", "부산광역시": "Busan", "대구광역시": "Daegu", "인천광역시": "Incheon",
-    "광주광역시": "Gwangju", "대전광역시": "Daejeon", "울산광역시": "Ulsan", "세종특별자치시": "Sejong",
-    "경기도": "Gyeonggi", "강원도": "Gangwon", "충청북도": "Chungbuk", "충청남도": "Chungnam",
-    "전라북도": "Jeonbuk", "전라남도": "Jeonnam", "경상북도": "Gyeongbuk", "경상남도": "Gyeongnam",
-    "제주특별자치도": "Jeju",
-}
-
-# ---------------------------------------------------------------------------
-# Automatic romanization for gu/dong names (thousands of unique names --
-# a hand-built dictionary isn't practical, so we romanize programmatically).
-# ---------------------------------------------------------------------------
-_SUFFIX_EN = {"시": "si", "군": "gun", "구": "gu", "읍": "eup", "면": "myeon", "동": "dong", "리": "ri"}
-_MULTI_LEVEL_CITY = [
-    "수원시", "성남시", "안양시", "안산시", "용인시", "청주시", "천안시",
-    "전주시", "포항시", "창원시", "고양시", "부천시",
-]
-
-
-def _romanize_simple(name):
-    m = re.match(r"^(.*?)(\d*)(시|군|구|읍|면|동|리)$", name)
-    if m:
-        base, num, suf = m.groups()
-        base_r = Romanizer(base).romanize().capitalize() if base else ""
-        suf_en = _SUFFIX_EN[suf]
-        return f"{base_r} {num}-{suf_en}".strip() if num else f"{base_r}-{suf_en}".strip()
-    return Romanizer(name).romanize().capitalize()
-
-
-def romanize_name(name):
-    if not isinstance(name, str) or not name:
-        return name
-    for city in _MULTI_LEVEL_CITY:
-        if name.startswith(city) and name != city:
-            base = Romanizer(city[:-1]).romanize().capitalize()
-            return f"{base}-si {_romanize_simple(name[len(city):])}"
-    return _romanize_simple(name)
-
-
-@st.cache_data
-def build_name_maps(df):
-    gu_map = {n: romanize_name(n) for n in df["구시군명"].unique()}
-    dong_map = {n: romanize_name(n) for n in df["읍면동명"].unique()}
-    return gu_map, dong_map
-
-
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
 @st.cache_data
 def load_data():
     return pd.read_csv(DATA_PATH)
-
-
-@st.cache_data
-def load_geojson(path):
-    """Convert a southkorea-maps-style TopoJSON into a GeoJSON FeatureCollection
-    (arc delta-decoding implemented by hand, no extra topojson package needed).
-    Returns None if the file isn't there yet -- the rest of the app still works without it.
-    """
-    if not os.path.exists(path):
-        return None
-
-    with open(path, encoding="utf-8") as f:
-        topo = json.load(f)
-
-    scale = topo["transform"]["scale"]
-    translate = topo["transform"]["translate"]
-
-    def decode_arc(arc):
-        x, y = 0, 0
-        coords = []
-        for dx, dy in arc:
-            x += dx
-            y += dy
-            coords.append([x * scale[0] + translate[0], y * scale[1] + translate[1]])
-        return coords
-
-    arcs = [decode_arc(a) for a in topo["arcs"]]
-
-    def resolve_ring(arc_indices):
-        ring = []
-        for idx in arc_indices:
-            seg = arcs[idx] if idx >= 0 else list(reversed(arcs[~idx]))
-            if ring and ring[-1] == seg[0]:
-                ring.extend(seg[1:])
-            else:
-                ring.extend(seg)
-        return ring
-
-    obj_name = list(topo["objects"].keys())[0]
-    geometries = topo["objects"][obj_name]["geometries"]
-
-    features = []
-    for g in geometries:
-        gtype = g["type"]
-        if gtype == "Polygon":
-            rings = [resolve_ring(r) for r in g["arcs"]]
-            geom = {"type": "Polygon", "coordinates": rings}
-        elif gtype == "MultiPolygon":
-            polys = [[resolve_ring(r) for r in poly] for poly in g["arcs"]]
-            geom = {"type": "MultiPolygon", "coordinates": polys}
-        else:
-            continue
-
-        props = dict(g.get("properties", {}))
-        # Gu/gun names alone repeat across sido (e.g. "동구"/"중구"/"서구" exist in several
-        # cities), so we rebuild a "sido_gu" join key from the code prefix to avoid mis-joins.
-        code = str(props.get("code", ""))
-        sido_name = SIDO_CODE_PREFIX.get(code[:2], "")
-        gu_name = NAME_ALIAS.get(props.get("name", ""), props.get("name", ""))
-        props["join_key"] = f"{sido_name}_{gu_name}"
-        features.append({"type": "Feature", "properties": props, "geometry": geom})
-
-    return {"type": "FeatureCollection", "features": features}
 
 
 df = load_data()
@@ -255,25 +108,20 @@ with col_left:
         else:
             color_kwargs = dict(color_continuous_scale="Reds")
 
-        map_kwargs = dict(
-            data_frame=gu_summary,
-            geojson=geojson,
-            locations="join_key",
-            featureidkey="properties.join_key",
-            color=map_metric,
-            zoom=5.8,
-            center={"lat": 36.3, "lon": 127.8},
-            opacity=0.75,
+        fig_map = choropleth_map(
+            gu_summary,
+            geojson,
+            map_metric,
             hover_data=["Sido", "Gu/Gun/Si"],
+            opacity=0.75,
+            height=430,
+            margin=dict(l=0, r=0, t=0, b=0),
             **color_kwargs,
         )
-        # Newer plotly has choropleth_map (maplibre); fall back to choropleth_mapbox on older installs
-        if hasattr(px, "choropleth_map"):
-            fig_map = px.choropleth_map(map_style="carto-positron", **map_kwargs)
+        if fig_map is not None:
+            st.plotly_chart(fig_map, use_container_width=True)
         else:
-            fig_map = px.choropleth_mapbox(mapbox_style="carto-positron", **map_kwargs)
-        fig_map.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=430)
-        st.plotly_chart(fig_map, use_container_width=True)
+            st.info("No data available for this selection.")
 
     st.caption(f"Selected: {SIDO_EN.get(sido, sido)} > {GU_EN.get(gu, gu)} > {DONG_EN.get(dong, dong)}")
 
