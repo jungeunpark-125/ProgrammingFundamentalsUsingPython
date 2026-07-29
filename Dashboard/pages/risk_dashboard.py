@@ -278,7 +278,9 @@ with col_left:
 
     st.subheader(t["turnout_subheader"].format(gu=gu_disp))
     gu_df = df[(df["시도명"] == sido) & (df["구시군명"] == gu)].copy()
-    gu_table = gu_df.pivot_table(index="읍면동명", columns="선거명", values="당일투표율").round(1).rename(columns=election_label)
+    # 당일투표율 is stored as a fraction (0-1); the subheader labels this table
+    # as "(%)", so scale to a percentage to keep units consistent.
+    gu_table = (gu_df.pivot_table(index="읍면동명", columns="선거명", values="당일투표율") * 100).round(1).rename(columns=election_label)
     if lang == "en":
         gu_table.index = gu_table.index.map(lambda d: DONG_EN.get(d, d))
     gu_table.index.name = t["dong_index_name"]
