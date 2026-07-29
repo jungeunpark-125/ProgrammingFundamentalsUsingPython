@@ -57,22 +57,25 @@ STR = {
         turnout_subheader="{gu}: election-day turnout rate by dong (%)",
         dong_index_name="Dong",
         detail_subheader="{dong} -- detail",
-        registered_delta="Registered voters",
+        registered_delta="{dong} registered voters",
         registered_suffix="",
         risk_context_caption=(
             "Rate risk (variance-based) is only defined where there are sub-units to compare -- "
             "gu/sido level. Values below are for {gu}'s parent gu and sido."
         ),
-        gu_abs_risk_label="Gu absolute risk (ballots)",
+        gu_abs_risk_label="{gu} absolute risk (ballots)",
         gu_abs_risk_help="Sum of (day-of votes - 50%-prepared ballots) across all dongs in this gu. Positive = net shortage.",
-        gu_rate_risk_label="Gu rate risk (std ratio)",
+        gu_rate_risk_label="{gu} rate risk (std ratio)",
         gu_rate_risk_help="This gu's std of Risk_index_50 across its dongs, divided by the national average of that std. >1 = more internal volatility than average (some dongs may run short even if the gu average looks fine).",
-        sido_rate_risk_label="Sido rate risk (std ratio)",
+        sido_rate_risk_label="{sido} rate risk (std ratio)",
         sido_rate_risk_help="This sido's std of gu-level Risk_index_50, divided by the national average of that std.",
         ratio_unit="x",
         tab_labels=["Trends", "Threshold Simulator", "Radar Profile"],
-        trend_abs_title="Absolute risk (day-of votes − 50%-prepared ballots, signed)",
+        trend_abs_title="{dong} absolute risk (day-of votes − 50%-prepared ballots, signed)",
         trend_abs_caption="Positive = shortage (day-of votes exceeded the 50%-prepared ballots). Negative = surplus.",
+        turnout_trend_title="{dong} election-day turnout rate (%)",
+        turnout_trend_axis_label="Turnout rate (%)",
+        turnout_trend_caption="Day-of turnout keeps falling across the elections — which is exactly why the absolute risk above shifts from shortage to surplus.",
         trend_rate_title="Rate risk of {gu} (this dong's parent gu)",
         trend_rate_caption=(
             "Std of Risk_index_50 across dongs in this gu, divided by the national average of that std "
@@ -124,22 +127,25 @@ STR = {
         turnout_subheader="{gu} 읍면동별 당일투표율 (%)",
         dong_index_name="읍면동",
         detail_subheader="{dong} 상세",
-        registered_delta="확정선거인수",
+        registered_delta="{dong} 확정선거인수",
         registered_suffix=" 명",
         risk_context_caption=(
             "비율 위험(변동성 기반)은 비교할 하위 단위가 있어야 계산할 수 있어요 — 구/시도 단위 값입니다. "
             "아래는 {dong}이 속한 {gu}(구)와 시도 기준 값이에요."
         ),
-        gu_abs_risk_label="구 절대량위험 (매수)",
+        gu_abs_risk_label="{gu} 절대량위험 (매수)",
         gu_abs_risk_help="구 안의 모든 동에서 (당일투표수 - 50%준비용지)를 합산한 값. 양수면 구 전체로도 순부족.",
-        gu_rate_risk_label="구 비율위험 (표준편차 비)",
+        gu_rate_risk_label="{gu} 비율위험 (표준편차 비)",
         gu_rate_risk_help="이 구 안 동들의 Risk_index_50 표준편차 ÷ 전국 구 표준편차 평균. 1보다 크면 이 구는 동네 간 격차(변동성)가 전국 평균보다 큼 — 구 평균은 괜찮아 보여도 특정 동에서 몰아서 부족할 위험.",
-        sido_rate_risk_label="시도 비율위험 (표준편차 비)",
+        sido_rate_risk_label="{sido} 비율위험 (표준편차 비)",
         sido_rate_risk_help="이 시도 안 구들의 Risk_index_50(구 단위) 표준편차 ÷ 전국 시도 표준편차 평균.",
         ratio_unit="배",
         tab_labels=["추이", "Threshold 시뮬레이터", "레이더 프로파일"],
-        trend_abs_title="절대량 위험 (당일투표수 − 50% 준비 용지, 부호 유지)",
+        trend_abs_title="{dong} 절대량 위험 (당일투표수 − 50% 준비 용지, 부호 유지)",
         trend_abs_caption="양수 = 부족(당일투표수가 50% 준비량을 초과), 음수 = 여유.",
+        turnout_trend_title="{dong} 당일투표율 추이 (%)",
+        turnout_trend_axis_label="당일투표율 (%)",
+        turnout_trend_caption="당일투표율이 회차마다 떨어졌습니다 — 위 절대량 위험이 부족에서 여유로 바뀐 이유입니다.",
         trend_rate_title="{gu}(이 동이 속한 구)의 비율 위험",
         trend_rate_caption=(
             "이 구 안 동들의 Risk_index_50 표준편차 ÷ 전국 평균 표준편차 (점선 = 1, 즉 전국 평균). "
@@ -248,11 +254,13 @@ with col_left:
             hover_cols = ["시도명", "구시군명"]
 
         # 절대량위험 is signed (+shortage / -surplus) -> diverging scale centered at 0.
-        # 비율위험 is a ratio centered around 1 (>1 = more variance than the national average).
+        # 비율위험 is a ratio centered on 1 (national average): >1 = more variance than
+        # typical, <1 = more uniform. Use a diverging scale centered at 1 so the map
+        # shows above/below the national average as red/blue instead of a single-hue ramp.
         if map_metric == "절대량위험":
             color_kwargs = dict(color_continuous_scale="RdBu_r", color_continuous_midpoint=0)
         else:
-            color_kwargs = dict(color_continuous_scale="Reds")
+            color_kwargs = dict(color_continuous_scale="RdBu_r", color_continuous_midpoint=1)
 
         fig_map = choropleth_map(
             gu_summary,
@@ -302,25 +310,24 @@ with col_right:
     info_cols = st.columns(len(dong_df)) if len(dong_df) > 0 else [st]
     for c, (_, row) in zip(info_cols, dong_df.iterrows()):
         with c:
-            st.metric(row["election_label"], f"{row['선거인수_총']:,.0f}{t['registered_suffix']}", t["registered_delta"])
+            st.metric(row["election_label"], f"{row['선거인수_총']:,.0f}{t['registered_suffix']}", t["registered_delta"].format(dong=dong_disp))
 
-    st.caption(t["risk_context_caption"].format(gu=gu_disp, dong=dong_disp))
     ctx_cols = st.columns(len(dong_df)) if len(dong_df) > 0 else [st]
     for c, (_, row) in zip(ctx_cols, dong_df.iterrows()):
         with c:
             st.markdown(f"**{row['election_label']}**")
             st.metric(
-                t["gu_abs_risk_label"],
+                t["gu_abs_risk_label"].format(gu=gu_disp),
                 f"{row['절대량위험_구']:+,.0f}",
                 help=t["gu_abs_risk_help"],
             )
             st.metric(
-                t["gu_rate_risk_label"],
+                t["gu_rate_risk_label"].format(gu=gu_disp),
                 f"{row['비율위험_구']:.2f}{t['ratio_unit']}" if pd.notna(row["비율위험_구"]) else "N/A",
                 help=t["gu_rate_risk_help"],
             )
             st.metric(
-                t["sido_rate_risk_label"],
+                t["sido_rate_risk_label"].format(sido=sido_disp),
                 f"{row['비율위험_시도']:.2f}{t['ratio_unit']}" if pd.notna(row["비율위험_시도"]) else "N/A",
                 help=t["sido_rate_risk_help"],
             )
@@ -331,7 +338,7 @@ with col_right:
     with tab_trend:
         fig = px.bar(
             dong_df, x="election_label", y="절대량위험",
-            title=t["trend_abs_title"],
+            title=t["trend_abs_title"].format(dong=dong_disp),
             color="election_label",
             labels={"election_label": t["election_axis_label"], "절대량위험": t["abs_risk_axis_label"]},
         )
@@ -340,16 +347,20 @@ with col_right:
         st.plotly_chart(fig, use_container_width=True)
         st.caption(t["trend_abs_caption"])
 
+        # Second chart: this dong's own day-of turnout trend. 당일투표율 is a
+        # fraction (0-1); scale to % so it reads as a percentage. Falling turnout
+        # is the direct cause of the absolute-risk shift shown in the chart above.
+        dong_df["당일투표율_pct_disp"] = dong_df["당일투표율"] * 100
         fig = px.bar(
-            dong_df, x="election_label", y="비율위험_구",
-            title=t["trend_rate_title"].format(gu=gu_disp),
-            color="election_label",
-            labels={"election_label": t["election_axis_label"], "비율위험_구": t["rate_risk_axis_label"]},
+            dong_df, x="election_label", y="당일투표율_pct_disp",
+            title=t["turnout_trend_title"].format(dong=dong_disp),
+            color="election_label", text="당일투표율_pct_disp",
+            labels={"election_label": t["election_axis_label"], "당일투표율_pct_disp": t["turnout_trend_axis_label"]},
         )
-        fig.add_hline(y=1, line_dash="dash", line_color="red")
+        fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
         fig.update_layout(showlegend=False, height=320)
         st.plotly_chart(fig, use_container_width=True)
-        st.caption(t["trend_rate_caption"])
+        st.caption(t["turnout_trend_caption"])
 
     # ---- Tab 2: live threshold slider --------------------------------------
     with tab_sim:
@@ -380,12 +391,20 @@ with col_right:
 
         fig_radar = go.Figure()
 
+        # Explicit trace colors: the first trace (previously plotly's sky-blue
+        # default) is green. The third slot uses blue so there is exactly one
+        # green line — the one that used to be sky-blue.
+        radar_line_colors = ["rgb(44,160,44)", "rgb(239,85,59)", "rgb(99,110,250)"]
+        radar_fill_colors = ["rgba(44,160,44,0.4)", "rgba(239,85,59,0.4)", "rgba(99,110,250,0.4)"]
+
         if radar_mode.startswith("a"):
-            for _, row in dong_df.iterrows():
+            for i, (_, row) in enumerate(dong_df.iterrows()):
                 values = [row[k] if pd.notna(row[k]) else 0 for k in axis_keys]
                 fig_radar.add_trace(go.Scatterpolar(
                     r=values + values[:1], theta=axis_labels + axis_labels[:1],
                     fill="toself", name=row["election_label"],
+                    line_color=radar_line_colors[i % len(radar_line_colors)],
+                    fillcolor=radar_fill_colors[i % len(radar_fill_colors)],
                 ))
         else:
             radar_election = st.selectbox(t["radar_election_label"], ELECTIONS, format_func=lambda e: election_label[e], index=2, key="radar_election")
@@ -395,14 +414,19 @@ with col_right:
 
             if not this_row.empty:
                 v = [this_row.iloc[0][k] if pd.notna(this_row.iloc[0][k]) else 0 for k in axis_keys]
-                fig_radar.add_trace(go.Scatterpolar(r=v + v[:1], theta=axis_labels + axis_labels[:1], fill="toself", name=dong_disp))
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=v + v[:1], theta=axis_labels + axis_labels[:1], fill="toself", name=dong_disp,
+                    line_color=radar_line_colors[0], fillcolor=radar_fill_colors[0],
+                ))
             fig_radar.add_trace(go.Scatterpolar(
                 r=list(gu_avg.values) + [gu_avg.values[0]], theta=axis_labels + axis_labels[:1],
                 name=t["gu_avg_label"].format(gu=gu_disp),
+                line_color=radar_line_colors[1],
             ))
             fig_radar.add_trace(go.Scatterpolar(
                 r=list(national_avg.values) + [national_avg.values[0]], theta=axis_labels + axis_labels[:1],
                 name=t["national_avg_label"],
+                line_color=radar_line_colors[2],
             ))
 
         fig_radar.update_layout(
