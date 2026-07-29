@@ -190,20 +190,14 @@ tab8, tab9 = st.tabs(t["tab_labels"])
 # 8th Election Backtest
 # =============================================================================
 with tab8:
-    sidebar8 = st.sidebar.container()
-    with sidebar8:
-        st.header(t["sidebar_backtest_header"])
+    # Controls live in the tab body (not the sidebar) so the sidebar stays
+    # clean and the 8th/9th tabs are laid out consistently. Safety level and
+    # map metric drive the KPIs and map below.
+    ctrl8a, ctrl8b = st.columns([1, 1])
+    with ctrl8a:
         safety8 = st.select_slider(t["safety_label"], options=SAFETY_LEVELS, value="99%", key="safety8")
+    with ctrl8b:
         map_metric8 = st.selectbox(t["map_metric_label"], t["map_metric_options"], key="map_metric8")
-        st.divider()
-        st.subheader(t["region_header"])
-        sido_list = sorted(BACKTEST["시도명"].dropna().unique())
-        default_sido_idx = sido_list.index("서울특별시") if "서울특별시" in sido_list else 0
-        sido8 = st.selectbox(t["sido_label"], sido_list, index=default_sido_idx, format_func=sido_fmt, key="sido8")
-        gu_list = sorted(BACKTEST.loc[BACKTEST["시도명"] == sido8, "구시군명"].dropna().unique())
-        gu8 = st.selectbox(t["gu_label"], gu_list, format_func=gu_fmt, key="gu8")
-        dong_list = sorted(BACKTEST.loc[(BACKTEST["시도명"] == sido8) & (BACKTEST["구시군명"] == gu8), "읍면동명"].dropna().unique())
-        dong8 = st.selectbox(t["dong_label"], dong_list, format_func=dong_fmt, key="dong8")
 
     c8 = get_backtest_columns(safety8)
     d8 = BACKTEST.copy()
@@ -328,6 +322,21 @@ with tab8:
         st.plotly_chart(fig_surplus, use_container_width=True)
 
     st.divider()
+
+    # Region selector for the per-dong detail panel below (moved out of the
+    # sidebar; placed next to the content it controls).
+    st.subheader(t["region_header"])
+    reg8a, reg8b, reg8c = st.columns(3)
+    with reg8a:
+        sido_list = sorted(BACKTEST["시도명"].dropna().unique())
+        default_sido_idx = sido_list.index("서울특별시") if "서울특별시" in sido_list else 0
+        sido8 = st.selectbox(t["sido_label"], sido_list, index=default_sido_idx, format_func=sido_fmt, key="sido8")
+    with reg8b:
+        gu_list = sorted(BACKTEST.loc[BACKTEST["시도명"] == sido8, "구시군명"].dropna().unique())
+        gu8 = st.selectbox(t["gu_label"], gu_list, format_func=gu_fmt, key="gu8")
+    with reg8c:
+        dong_list = sorted(BACKTEST.loc[(BACKTEST["시도명"] == sido8) & (BACKTEST["구시군명"] == gu8), "읍면동명"].dropna().unique())
+        dong8 = st.selectbox(t["dong_label"], dong_list, format_func=dong_fmt, key="dong8")
 
     detail_left8, detail_right8 = st.columns([1, 1.4], gap="large")
     selected8 = d8[(d8["시도명"] == sido8) & (d8["구시군명"] == gu8) & (d8["읍면동명"] == dong8)]
